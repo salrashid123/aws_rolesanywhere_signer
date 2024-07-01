@@ -499,6 +499,68 @@ go run kms/main.go  \
    --kmsKeyVersion=1 
 ```
 
+
+### Yubikey
+
+
+If you have the private key and optionally the certificate saved to a yubikey which has PIV functionality, you can access its crypto.signer too:
+
+```bash
+openssl pkcs12 --export -in certs/alice-cert.crt -inkey certs/alice-cert.key -out certs/alice-cert.p12
+
+$ yubico-piv-tool  -a status
+
+Version:	5.2.7
+Serial Number:	13981219
+CHUID:	3019d4e739da739ced39ce739d836858210842108421c84210c3eb3410e005a6c9f4f2cb3061da57e8f5c0b09d350832303330303130313e00fe00
+CCC:	No data available
+Slot 9c:	
+	Algorithm:	RSA2048
+	Subject DN:	L=US, O=Google, OU=Enterprise, CN=alice-cert.domain.com
+	Issuer DN:	C=US, O=Google, OU=Enterprise, CN=Single Root CA
+	Fingerprint:	5b305d0d825e74090508f2fd40fe18cec26851be1e146be5f380d3e84f6d11c8
+	Not Before:	May 18 14:49:31 2024 GMT
+	Not After:	May 18 14:49:31 2034 GMT
+PIN tries left:	3
+```
+
+usage is 
+
+```golang
+	cards, err := piv.Cards()
+	var ykey *piv.YubiKey
+	for _, card := range cards {
+		if strings.Contains(strings.ToLower(card), "yubikey") {
+			if ykey, err = piv.Open(card); err != nil {
+				os.Exit(1)
+			}
+			break
+		}
+	}
+	defer ykey.Close()
+
+	cc, err := ykey.Certificate(piv.SlotSignature)
+	auth := piv.KeyAuth{PIN: piv.DefaultPIN}
+	priv, err := ykey.PrivateKey(piv.SlotSignature, cc.PublicKey, auth)
+
+	key, ok := priv.(crypto.Signer)
+
+	sessionCredentials, err := rolesanywhere.NewAWSRolesAnywhereSignerCredentials(rolesanywhere.SignerProvider{
+		CredentialsOpts: rolesanywhere.CredentialsOpts{
+			Region:            *awsRegion,
+			RoleArn:           *roleARN,
+			TrustAnchorArnStr: *trustAnchorARN,
+			ProfileArnStr:     *profileARN,
+			Certificate:       cert,
+			CertificateChain:  chain,
+			Debug:             false,
+		},
+		Signer: key,
+	})
+```
+
+
+
 ---
 
 
