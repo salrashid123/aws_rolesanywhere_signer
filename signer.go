@@ -18,7 +18,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"os"
 	"sort"
 	"strings"
 	"time"
@@ -296,7 +295,8 @@ func createRequestSignFunction(signer crypto.Signer, signingAlgorithm string, ce
 		signatureBytes, err := signer.Sign(rand.Reader, h.Sum(nil), crypto.SHA256)
 		if err != nil {
 			log.Println(err.Error())
-			os.Exit(1)
+			// todo: find a way to return this error to the caller
+			return //os.Exit(1)
 		}
 		signature := hex.EncodeToString(signatureBytes)
 
