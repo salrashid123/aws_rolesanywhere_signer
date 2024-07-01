@@ -130,8 +130,11 @@ Note, I didn't actually implement [RolesAnywhere Signing process](https://docs.a
 For basic usage, just load whatever implements the signer and supply the properties to bootstrap the credential supplier
 
 ```golang
+import (
+	rolesanywhere "github.com/salrashid123/aws_rolesanywhere_signer"
+)
 	sessionCredentials, err := rolesanywhere.NewAWSRolesAnywhereSignerCredentials(rolesanywhere.SignerProvider{
-		CredentialsOpts: awssigner.CredentialsOpts{
+		CredentialsOpts: rolesanywhere.CredentialsOpts{
 			Region:            *awsRegion,
 			RoleArn:           *roleARN,
 			TrustAnchorArnStr: *trustAnchorARN,
@@ -216,6 +219,10 @@ At this point, the private key is saved into a persistentHandle as well as a PEM
 The basic usage is like this:
 
 ```golang
+import (
+	rolesanywhere "github.com/salrashid123/aws_rolesanywhere_signer"
+)
+
 	handle := tpm2.TPMHandle(*persistentHandle)
 
 	pub, err := tpm2.ReadPublic{
@@ -231,7 +238,7 @@ The basic usage is like this:
 	})
 
 	sessionCredentials, err := rolesanywhere.NewAWSRolesAnywhereSignerCredentials(rolesanywhere.SignerProvider{
-		CredentialsOpts: awssigner.CredentialsOpts{
+		CredentialsOpts: rolesanywhere.CredentialsOpts{
 			Region:            *awsRegion,
 			RoleArn:           *roleARN,
 			TrustAnchorArnStr: *trustAnchorARN,
@@ -282,6 +289,10 @@ tpm2_evictcontrol -C o -c key2.ctx 0x81010003
 At this point, if you want to access the key, you must first fulfill the policy with a session:
 
 ```golang
+import (
+	rolesanywhere "github.com/salrashid123/aws_rolesanywhere_signer"
+)
+
 	handle := tpm2.TPMHandle(*persistentHandle)
 
 	pub, err := tpm2.ReadPublic{
@@ -300,7 +311,7 @@ At this point, if you want to access the key, you must first fulfill the policy 
 	})
 
 	sessionCredentials, err := rolesanywhere.NewAWSRolesAnywhereSignerCredentials(rolesanywhere.SignerProvider{
-		CredentialsOpts: awssigner.CredentialsOpts{
+		CredentialsOpts: rolesanywhere.CredentialsOpts{
 			Region:            *awsRegion,
 			RoleArn:           *roleARN,
 			TrustAnchorArnStr: *trustAnchorARN,
