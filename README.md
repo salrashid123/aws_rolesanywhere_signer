@@ -4,15 +4,15 @@ Library in go for use with AWS SDKs and [RolesAnywhere](https://docs.aws.amazon.
 
 What this library provides is basically an [AWS v2 SDK Credential](https://pkg.go.dev/github.com/aws/aws-sdk-go-v2/aws#Credentials) in go which is ultimately employing RolesAnywhere based certificates.
 
-Unlike [rolesanywhere-credential-helper](https://github.com/aws/rolesanywhere-credential-helper), this library does _not_ require invoking an external process but rather you can use this to directly acquire credentials in code (ref [issues/352](https://github.com/aws/aws-sdk/issues/352)).  This also has the distinct flexibility to define and control the parameters for any underlying signer (eg, if you wanted to first fulfill custom policy governing access to the key like a TPM password or PCR policy)
+Unlike [rolesanywhere-credential-helper](https://github.com/aws/rolesanywhere-credential-helper), this library does _not_ require invoking an external process but rather you can use this to directly acquire credentials in code similar to [python iam-roles-anywhere-session](https://github.com/awslabs/iam-roles-anywhere-session).  This also has the distinct flexibility to define and control the parameters for any underlying signer (eg, if you wanted to first fulfill custom policy governing access to the key like a TPM password or PCR policy)
 
 Notably, this allows for the source of the private key used for signing to be anything that meets go's [crypto.Signer](https://pkg.go.dev/crypto#Signer) interface.
 
-This means the private key can be form a:
+This means the private key can be from
 
 * **File**
 
-  Since in go `RSA/ECC` keys are actually [signers themselves](https://pkg.go.dev/crypto/rsa#PrivateKey.Sign)
+  Since in go even normal `RSA/ECC` keys loaded from files are actually [signers themselves](https://pkg.go.dev/crypto/rsa#PrivateKey.Sign)
 
 * **TPM (Trusted Platform Module)**
 
@@ -26,11 +26,32 @@ This means the private key can be form a:
 
   If you really wanted to, you can create a `crypto.Signer` with a KMS backed key (or you could use its pkcs11 interface, if available).  It seems azure's go sdks implements it [here](https://pkg.go.dev/go.step.sm/crypto/kms/azurekms#Signer) but on GCP, the only implementation one i know of is [my own](https://github.com/salrashid123/signer) on GCP.  This is ofcourse experimental.
 
-I didn't actually implement [RolesAnywhere Signing process](https://docs.aws.amazon.com/rolesanywhere/latest/userguide/authentication-sign-process.html) (which seems really particular) but instead, i just used snippets found in `rolesanywhere-credential-helper` which already did the signing steps.
+* **Yubikey**
+
+  If you happens to use a certificate and key  on a Yubikey PIV  
+
+You can ofcourse also use this library with systems simply delvier x509 certs and keys.  Such systems can be using
+
+* **Spiffie**
+
+  [Spiffie](https://spiffe.io/) protocol will deliver a x509 cert and key to a workload.  You can use this library to bootstrap rolesanywhwere using that keypair
+
+* **Hashicorp Vault PKI**
+
+   If for some reason you just can't use the vault aws secrets engine...
+
+* **Kuberentes certificates.k8s.io**
+
+   Issue x509 certificates to pods using [certificates.k8s.io](https://kubernetes.io/docs/reference/access-authn-authz/certificate-signing-requests/) which will allow and external CA to sign and issue certificates to workloads/services.  See [example](https://kubernetes.io/docs/tasks/tls/managing-tls-in-a-cluster/)
+
+
+I didn't actually implement [RolesAnywhere Signing process](https://docs.aws.amazon.com/rolesanywhere/latest/userguide/authentication-sign-process.html) into this library but that is a TODO (see signing process implementation below).  I instead used snippets from `rolesanywhere-credential-helper` to do the signature construction.
+
+If you want to see the signing process in go directly, see [example/protocol/main.go](example/protocol/main.go) implementation which performs all the signing steps by hand one at a time.  A todo maybe to replace the signing code with a raw implementation but i don't know of a reason to do so now.
 
 ---
 
->> This library is NOT supported by google and is experimental.
+>> This library is NOT officially supported by aws or google; just contributors
 
 ---
 
@@ -149,13 +170,6 @@ import (
 	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion(*awsRegion), config.WithCredentialsProvider(sessionCredentials))
 ```
 
-### Resident vs Imported Key
-
-All the examples below for TPM, PKCS and KMS *loads an external (imported) key*  into the device.  However, if you want to, you can create a key on the device itself, then since they all implement a `crypto.Signer`, you can generate a CSR and issue an x509 against it ...all without the key leaving the device ever.
-
-For more information about this, see references here for [TPM](https://github.com/salrashid123/signer), [KMS](https://github.com/salrashid123/kms_golang_signer?tab=readme-ov-file#create-a-csr), [pkcs](https://github.com/salrashid123/mtls_pkcs11?tab=readme-ov-file#generate-mtls-certs)
-
-
 ### PEM Private Key Files
 
 Basically, this flow just use RSA or ECC keys on disk...nothing more.
@@ -190,13 +204,6 @@ This is a bit harder to setup and we'll use `tpm2_tools`, `tpm2-tss-engine-tools
 anyway,
 
 ```bash
-## first startup a software TPM
-rm -rf /tmp/myvtpm && mkdir /tmp/myvtpm  && sudo swtpm socket --tpmstate dir=/tmp/myvtpm --tpm2 --server type=tcp,port=2321 --ctrl type=tcp,port=2322 --flags not-need-init,startup-clear --log level=5
-
-
-## and export env var which allows tpm2-tools to use the swtpm
-export TPM2TOOLS_TCTI="swtpm:port=2321"
-
 ## first generate a primary key, we're using the "H2 Template"
 ## as described in https://www.hansenpartnership.com/draft-bottomley-tpm2-keys.html#name-parent
 cd example/certs
@@ -208,19 +215,17 @@ tpm2_import -C primary.ctx -G rsa2048:rsassa:null -g sha256 -i alice-cert.key -u
 tpm2_flushcontext -t
 tpm2_load -C primary.ctx -u key.pub -r key.prv -c key.ctx
 
-# sudo apt-get install tpm2-tss-engine-tools
-tpm2tss-genkey -u key.pub -r key.prv private.pem
-
-tpm2_evictcontrol -C o -c key.ctx 0x81010002
+tpm2_evictcontrol -C o -c key.ctx 0x81010003
 ```
 
-At this point, the private key is saved into a persistentHandle as well as a PEM key file...both are protected by the TPM and are useless outside of that system.
+At this point, the private key is saved into a persistentHandle (you can also save to PEM file (shown below))...both are protected by the TPM and are useless outside of that system.
 
 The basic usage is like this:
 
 ```golang
 import (
 	rolesanywhere "github.com/salrashid123/aws_rolesanywhere_signer"
+	saltpm "github.com/salrashid123/signer/tpm"	
 )
 
 	handle := tpm2.TPMHandle(*persistentHandle)
@@ -262,18 +267,38 @@ go run tpm/nopolicy/main.go --persistent-handle=0x81010002 \
    --awsRegion=$REGION \
    --roleARN=$ROLE_ARN \
    --trustAnchorARN=$TRUST_ANCHOR_ARN \
-   --profileARN=$PROFILE_ARN
+   --profileARN=$PROFILE_ARN  --tpm-path=/dev/tpmrm0
+```
 
+The example above used persistentHandles for the keys.  A more efficient way would be to save the key to files and then save/load them as PEM [keyfiles](https://github.com/Foxboron/go-tpm-keyfiles)
+
+If you used `tpm2_tools` to create the keys, then to convert a basic `TPM2B_PUBLIC` and `TPM2B_PRIVATE` into PEM formats:
+
+- for openssl1.1:
+
+```bash
+sudo apt-get install tpm2-tss-engine-tools
+tpm2tss-genkey -u key.pub -r key.prv private.pem
+```
+
+- for openssl3:
+
+its still a TBD [issue#17](https://github.com/tpm2-software/tpm2-openssl/issues/17) as an alternative you can use this wrapper to generate the PEM files easily [tpm2-genkey](https://github.com/salrashid123/tpm2-genkey) 
+
+Then to run, specify the keyfile
+```bash
 ## with keyfile
 go run tpm/nopolicy/main.go --keyfile=certs/private.pem \
    --certPath=$CERT_PATH \
    --awsRegion=$REGION \
    --roleARN=$ROLE_ARN \
    --trustAnchorARN=$TRUST_ANCHOR_ARN \
-   --profileARN=$PROFILE_ARN
+   --profileARN=$PROFILE_ARN  --tpm-path=/dev/tpmrm0
 ```
 
-You can also specify any TPM policy to use.  For example, suppose i create and embed a key which requires a passphrase
+##### TPM Policy
+
+You can also specify any TPM policy to use.  For example, suppose i create and embed a key which requires a passphrase.
 
 ```bash
 ### policy password
@@ -281,16 +306,16 @@ tpm2_import -C primary.ctx -G rsa2048:rsassa:null -g sha256 -i alice-cert.key -u
 tpm2_flushcontext -t
 tpm2_load -C primary.ctx -u key2.pub -r key2.prv -c key2.ctx
 tpm2_flushcontext -t
-# sudo apt-get install tpm2-tss-engine-tools
-tpm2tss-genkey -u key2.pub -r key2.prv private2.pem
+
 tpm2_evictcontrol -C o -c key2.ctx 0x81010003
 ```
 
-At this point, if you want to access the key, you must first fulfill the policy with a session:
+Then if you want to access the key, you must first fulfill the policy with a session:
 
 ```golang
 import (
 	rolesanywhere "github.com/salrashid123/aws_rolesanywhere_signer"
+	saltpm "github.com/salrashid123/signer/tpm"	
 )
 
 	handle := tpm2.TPMHandle(*persistentHandle)
@@ -339,9 +364,7 @@ go run tpm/policy_password/main.go --persistent-handle=0x81010003 --keyPass=test
    --profileARN=$PROFILE_ARN
 ```
 
-for more information, see the examples below 
-
-### PKCS
+### PKCS-11
 
 PKCS is a quite a bit harder to setup and while it offers a generic interface, if you just want to access the TPM directly, i'd skip this and use the section above.
 
@@ -499,11 +522,218 @@ go run kms/main.go  \
    --kmsKeyVersion=1 
 ```
 
+### Resident vs Imported Key
+
+All the examples for TPM, PKCS and KMS *loads an external (imported) key*  into the device.  However, if you want to, you can create a key on the device itself, then since they all implement a `crypto.Signer`, you can generate a CSR and issue an x509 against it ...all without the key leaving the device ever.
+
+For more information about this, see references here for [TPM](https://github.com/salrashid123/signer), [KMS](https://github.com/salrashid123/kms_golang_signer?tab=readme-ov-file#create-a-csr), [pkcs](https://github.com/salrashid123/mtls_pkcs11?tab=readme-ov-file#generate-mtls-certs)
+
+
+### Vault PKI
+
+You can also use this library with Hashicorp  Vaults [PKI secrets engine](https://developer.hashicorp.com/vault/docs/secrets/pki) which will exchange a vault credential for a cert and key. 
+
+Yes, i know, vault already provides a direct way to get aws credentials using its plain old [AWS secrets engine](https://developer.hashicorp.com/vault/docs/secrets/aws) which makes using this mode even more rare anyway...but this is just a demo too.
+
+also see: [IAM Roles Anywhere via Hashicorp Vault](https://www.youtube.com/watch?v=i3wjMnaeqF0)
+
+
+To setup in dev mode:
+
+```bash
+vault server -dev -dev-root-token-id=mytoken
+
+# new window, copy over the vault token value for admin stuff
+export VAULT_TOKEN=mytoken
+export VAULT_ADDR='http://127.0.0.1:8200'
+
+vault secrets enable pki
+
+vault write pki/config/urls \
+    issuing_certificates="http://localhost:8200/v1/pki/ca" \
+    crl_distribution_points="http://localhost:8200/v1/pki/crl"
+
+## the following will generate the CA certificate.  Use this to create the trust anchor
+vault write pki/root/generate/internal  common_name=domain.com  ttl=8760h
+
+vault write pki/config/urls issuing_certificates="http://localhost:8200/v1/pki/ca" \
+     crl_distribution_points="http:/localhost:8200/localhost:8200/v1/pki/crl"
+
+vault write pki/roles/domain-dot-com \
+    allowed_domains=domain.com \
+    allow_subdomains=true \
+    max_ttl=72h
+
+## create a policy...this one is silly because it'll allow only creation of cn=alice-cert.domain.com
+vault policy write pki-policy-client pki_client.hcl
+
+## this will create the vault token entitled to create a certifiate defined in `pki_client.hcl`
+vault token create -policy=pki-policy-client
+
+		Key                  Value
+		---                  -----
+		token                hvs.CAESIE1tslxjpclKg9FCXQnnmxxoOhEQ68Y_TJRrJGsIS-MQGh4KHGh2cy5iNXl1eFBzMkcyTGNqa3gzb1UwVW52Y2w
+		token_accessor       s09IYAvWKIVSAsKApXijzhnO
+```
+
+In a new window, export the new token and see if it all works using vault cli
+
+```bash
+export VAULT_TOKEN=hvs.CAESIE1tslxjpclKg9FCXQnnmxxoOhEQ68Y_TJRrJGsIS-MQGh4KHGh2cy5iNXl1eFBzMkcyTGNqa3gzb1UwVW52Y2w
+export VAULT_ADDR='http://127.0.0.1:8200'
+
+## the following will return the issuing CA, the public x509 and the private key
+vault write pki/issue/domain-dot-com common_name="alice-cert.domain.com"
+```
+
+now use with rolesanywhere
+
+```bash
+go run vault/main.go --vaultToken=$VAULT_TOKEN --vaultHost=$VAULT_ADDR \
+   --vaultPolicy=pki/issue/domain-dot-com --vaultCN=alice-cert.domain.com \
+   --awsRegion=us-east-2 --roleARN=$rolearn --trustAnchorARN=$trustanchorarn \
+   --profileARN=$profilearn
+
+```
+
+### Spiffie
+
+If you need to authenticate from a workload which acquires mesh credentials via [SPIFFIE](https://spiffe.io/), you can use the same credentials provided by spiffie to authenticate to AWS using this library.
+
+The following will setup a local spire server and client, then configure aws rolesanywhere to acquire credentials.
+
+```bash
+## first get a release version of spire
+#  https://github.com/spiffe/spire/releases
+$ wget https://github.com/spiffe/spire/releases/download/v1.9.5/spire-1.9.5-linux-amd64-musl.tar.gz
+$ gzip -d spire-1.9.5-linux-amd64-musl.tar.gz
+
+## start server
+$ bin/spire-server run -config conf/server/server.conf
+
+## generate a token for the agent 
+$ bin/spire-server token generate -spiffeID spiffe://example.org/myagent
+  50d42d10-f156-4311-8f10-8cafebcf395e
+
+## use the token to run the agent
+$ bin/spire-agent run -config conf/agent/agent.conf -joinToken 47419f06-4c14-406a-aa12-44736a223778
+
+## acquire the cert and keys for the wrokload
+$ bin/spire-agent api fetch x509 -write /tmp/
+
+		Received 1 svid after 7.077893ms
+
+		SPIFFE ID:		spiffe://example.org/myservice
+		SVID Valid After:	2024-07-09 00:26:55 +0000 UTC
+		SVID Valid Until:	2024-07-11 00:27:05 +0000 UTC
+		CA #1 Valid After:	2024-07-02 10:59:35 +0000 UTC
+		CA #1 Valid Until:	2024-07-09 10:59:45 +0000 UTC
+		CA #2 Valid After:	2024-07-09 00:22:55 +0000 UTC
+		CA #2 Valid Until:	2024-07-16 00:23:05 +0000 UTC
+
+		Writing SVID #0 to file /tmp/svid.0.pem.
+		Writing key #0 to file /tmp/svid.0.key.
+		Writing bundle #0 to file /tmp/bundle.0.pem.
+
+## print out the CA
+$ cat /tmp/bundle.0.pem 
+		-----BEGIN CERTIFICATE-----
+		MIIB/zCCAaWgAwIBAgIQKbXWw4tvkX4Sts/TgzGejzAKBggqhkjOPQQDAjBPMQsw
+		CQYDVQQGEwJVUzEPMA0GA1UEChMGU1BJRkZFMS8wLQYDVQQFEyY1NTQ0MjUwOTQ4
+		Njg3NjUyMDUyODc1OTExNjE4MjgxNTA4ODI3MTAeFw0yNDA3MDIxMDU5MzVaFw0y
+		NDA3MDkxMDU5NDVaME8xCzAJBgNVBAYTAlVTMQ8wDQYDVQQKEwZTUElGRkUxLzAt
+		BgNVBAUTJjU1NDQyNTA5NDg2ODc2NTIwNTI4NzU5MTE2MTgyODE1MDg4MjcxMFkw
+		EwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAENgRlehJJGntRS8VUPfjIGCOEC2mt+9cr
+		JiKPdjr9uBFdCQ3HaPWEqnWDtfgTZ9BLJpatYe96IApQuMMFyNum5aNjMGEwDgYD
+		VR0PAQH/BAQDAgEGMA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFG5RxHHSULjE
+		2J7VVA5NYpNWnDSKMB8GA1UdEQQYMBaGFHNwaWZmZTovL2V4YW1wbGUub3JnMAoG
+		CCqGSM49BAMCA0gAMEUCIQCUe2Gw7sRtGJlUv+GQrR7IhJ96MpfXefoBYtnG86ev
+		AAIgblzxNzoUmBSI1BdlGmNjWdErE2qXwW3Gh/f67ICwlfI=
+		-----END CERTIFICATE-----
+		-----BEGIN CERTIFICATE-----
+		MIICAjCCAaigAwIBAgIRAJISwMIrV6ApEOuZPCzzMPMwCgYIKoZIzj0EAwIwUDEL
+		MAkGA1UEBhMCVVMxDzANBgNVBAoTBlNQSUZGRTEwMC4GA1UEBRMnMTk0MTY0NjU4
+		MzM0MzcyNTYxNTM0MDY5NTg0MjIxMTg1NDU0MzIzMB4XDTI0MDcwOTAwMjI1NVoX
+		DTI0MDcxNjAwMjMwNVowUDELMAkGA1UEBhMCVVMxDzANBgNVBAoTBlNQSUZGRTEw
+		MC4GA1UEBRMnMTk0MTY0NjU4MzM0MzcyNTYxNTM0MDY5NTg0MjIxMTg1NDU0MzIz
+		MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEaVlJHxuTLtus3qkknIxdzgzq+sdZ
+		OtH2G/cgiIqkDCcU6kpZ58CJ2KWL7l83CdPh9lVyPzsEKje6KSmhSeQd26NjMGEw
+		DgYDVR0PAQH/BAQDAgEGMA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFJj6Gnty
+		zwwQGnVNy5tCOaTetJgGMB8GA1UdEQQYMBaGFHNwaWZmZTovL2V4YW1wbGUub3Jn
+		MAoGCCqGSM49BAMCA0gAMEUCIAspDxts7k5hF9VvuEoVKQQEe8dYBp0pMRxgGFxz
+		Z5VNAiEA/mw0dfbzPt/lxXd3q49GGjVn4Nfj30bSzWg4aIfZunc=
+		-----END CERTIFICATE-----
+```
+
+Configure a new AWS RolesAnywhere trust anchor using both ca chains above.
+
+Remember to set the condition on its use to just the workload:
+
+* `"aws:PrincipalTag/x509SAN/URI": "spiffe://example.org/myservice"`
+
+
+as in:
+
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Principal": {
+                "Service": "rolesanywhere.amazonaws.com"
+            },
+            "Action": [
+                "sts:AssumeRole",
+                "sts:TagSession",
+                "sts:SetSourceIdentity"
+            ],
+            "Condition": {
+                "StringEquals": {
+                    "aws:PrincipalTag/x509SAN/URI": "spiffe://example.org/myservice"
+                },
+                "ArnEquals": {
+                    "aws:SourceArn": "arn:aws:rolesanywhere:us-east-2:291738886548:trust-anchor/572e4711-1d8d-4fb8-be0f-7b1aa57ca4f0"
+                }
+            }
+        }
+    ]
+}
+```
+
+Test the configuration standalone using the `aws_signing_helper`
+
+```bash
+export REGION=us-east-2
+export CERT_PATH=/tmp/svid.0.pem
+export ROLE_ARN=arn:aws:iam::291738886548:role/spiffierole1
+export TRUST_ANCHOR_ARN=arn:aws:rolesanywhere:us-east-2:291738886548:trust-anchor/572e4711-1d8d-4fb8-be0f-7b1aa57ca4f0
+export PROFILE_ARN=arn:aws:rolesanywhere:us-east-2:291738886548:profile/6f4943fb-13d4-4242-89c4-be367595c380
+
+aws_signing_helper credential-process \
+    --certificate $CERT_PATH \
+    --private-key /tmp/svid.0.key \
+    --role-arn $ROLE_ARN \
+    --trust-anchor-arn $TRUST_ANCHOR_ARN \
+    --profile-arn $PROFILE_ARN
+```
+
+If that works, run the client
+
+The client will setup an svid listener and whenever it recieves a new svid, it will invoke this library to acquire aws credentials.
+
+```bash
+export SPIFFE_ENDPOINT_SOCKET=unix:///tmp/spire-agent/public/api.sock
+
+go run spiffie/main.go --awsRegion=$REGION \
+   --profileARN=$PROFILE_ARN \
+   --roleARN=$ROLE_ARN \
+   --trustAnchorARN=$TRUST_ANCHOR_ARN
+```
 
 ### Yubikey
 
-
-If you have the private key and optionally the certificate saved to a yubikey which has PIV functionality, you can access its crypto.signer too:
+If you have the private key and optionally the certificate saved to a yubikey PIV slot 9c (digital signatures), you can access its crypto.signer from there:
 
 ```bash
 openssl pkcs12 --export -in certs/alice-cert.crt -inkey certs/alice-cert.key -out certs/alice-cert.p12
@@ -559,9 +789,20 @@ usage is
 	})
 ```
 
-
-
 ---
+
+
+### Troubleshooting
+
+Well, its could be a number of things but sometimes the error is obvious:
+
+* `{"message":"Specified Trust Anchor is disabled."}`
+
+some are not
+
+* `{"message":"Invalid signature"}`
+
+  This could happen if the local clock is +/- 10mins off  (emperically).  Which is pretty suprising with aws that it allows such lenient tolerances.
 
 
 ### Misc References

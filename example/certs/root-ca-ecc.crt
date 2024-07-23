@@ -1,0 +1,57 @@
+Certificate:
+    Data:
+        Version: 3 (0x2)
+        Serial Number: 1 (0x1)
+        Signature Algorithm: ecdsa-with-SHA256
+        Issuer: C=US, O=Google, OU=Enterprise, CN=Enterprise Root CA
+        Validity
+            Not Before: Jun 30 14:55:36 2024 GMT
+            Not After : Jun 30 14:55:36 2034 GMT
+        Subject: C=US, O=Google, OU=Enterprise, CN=Enterprise Root CA
+        Subject Public Key Info:
+            Public Key Algorithm: id-ecPublicKey
+                Public-Key: (384 bit)
+                pub:
+                    04:40:77:5e:7b:54:23:4f:73:74:31:82:68:c5:23:
+                    dd:81:af:58:c4:5a:2b:0f:2b:97:ac:40:1b:f9:37:
+                    8d:1f:7e:46:f7:b8:2f:67:a1:3c:ce:f5:fc:ce:13:
+                    b3:09:c5:2d:23:ce:75:1b:ba:e0:95:28:67:b4:ac:
+                    2d:20:f3:d5:40:15:5c:1e:07:49:71:d7:8d:c1:38:
+                    86:82:9b:da:fb:bd:c9:da:63:ed:5a:87:01:da:df:
+                    94:48:16:79:1c:87:1e
+                ASN1 OID: secp384r1
+                NIST CURVE: P-384
+        X509v3 extensions:
+            X509v3 Key Usage: critical
+                Certificate Sign, CRL Sign
+            X509v3 Basic Constraints: critical
+                CA:TRUE
+            X509v3 Subject Key Identifier: 
+                36:F0:A3:5D:CB:80:0C:9E:33:95:5C:AC:0C:F0:7F:E0:6F:B7:80:B9
+            X509v3 Authority Key Identifier: 
+                36:F0:A3:5D:CB:80:0C:9E:33:95:5C:AC:0C:F0:7F:E0:6F:B7:80:B9
+            X509v3 Extended Key Usage: 
+                TLS Web Server Authentication, TLS Web Client Authentication
+    Signature Algorithm: ecdsa-with-SHA256
+    Signature Value:
+        30:64:02:30:3b:28:c6:20:1e:06:9a:45:4d:4f:42:15:bb:81:
+        4f:16:97:ca:3d:9e:73:bc:aa:33:bc:41:01:8d:66:d8:df:8a:
+        91:37:6c:47:ae:69:0d:29:ba:bc:1e:98:2f:ec:1c:95:02:30:
+        02:16:af:62:81:5e:bc:8b:11:d0:c6:92:c3:58:e9:16:f5:0a:
+        0d:48:a5:98:0c:d0:9b:b9:33:9a:50:1e:c8:81:60:d8:2c:aa:
+        a4:b5:a9:72:fb:f4:01:ea:d0:fe:48:0e
+-----BEGIN CERTIFICATE-----
+MIICTzCCAdagAwIBAgIBATAKBggqhkjOPQQDAjBQMQswCQYDVQQGEwJVUzEPMA0G
+A1UECgwGR29vZ2xlMRMwEQYDVQQLDApFbnRlcnByaXNlMRswGQYDVQQDDBJFbnRl
+cnByaXNlIFJvb3QgQ0EwHhcNMjQwNjMwMTQ1NTM2WhcNMzQwNjMwMTQ1NTM2WjBQ
+MQswCQYDVQQGEwJVUzEPMA0GA1UECgwGR29vZ2xlMRMwEQYDVQQLDApFbnRlcnBy
+aXNlMRswGQYDVQQDDBJFbnRlcnByaXNlIFJvb3QgQ0EwdjAQBgcqhkjOPQIBBgUr
+gQQAIgNiAARAd157VCNPc3QxgmjFI92Br1jEWisPK5esQBv5N40ffkb3uC9noTzO
+9fzOE7MJxS0jznUbuuCVKGe0rC0g89VAFVweB0lx143BOIaCm9r7vcnaY+1ahwHa
+35RIFnkchx6jgYMwgYAwDgYDVR0PAQH/BAQDAgEGMA8GA1UdEwEB/wQFMAMBAf8w
+HQYDVR0OBBYEFDbwo13LgAyeM5VcrAzwf+Bvt4C5MB8GA1UdIwQYMBaAFDbwo13L
+gAyeM5VcrAzwf+Bvt4C5MB0GA1UdJQQWMBQGCCsGAQUFBwMBBggrBgEFBQcDAjAK
+BggqhkjOPQQDAgNnADBkAjA7KMYgHgaaRU1PQhW7gU8Wl8o9nnO8qjO8QQGNZtjf
+ipE3bEeuaQ0purwemC/sHJUCMAIWr2KBXryLEdDGksNY6Rb1Cg1IpZgM0Ju5M5pQ
+HsiBYNgsqqS1qXL79AHq0P5IDg==
+-----END CERTIFICATE-----

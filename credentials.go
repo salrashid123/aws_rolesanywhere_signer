@@ -62,6 +62,7 @@ type CredentialsOpts struct {
 	NoVerifySSL       bool
 	WithProxy         bool
 	Version           string
+	Date              time.Time // set the date/time for the credential generation (you shouldn't have to ever set this)
 
 	Debug bool
 }
@@ -147,14 +148,14 @@ func (s *signerCredentialsProvider) Retrieve(ctx context.Context) (aws.Credentia
 	k := s.signer.Public()
 	switch k.(type) {
 	case *ecdsa.PublicKey:
-		signatureAlgorithm = AWS4_x509_ecdsa_sha256
+		signatureAlgorithm = aws4_x509_ecdsa_sha256
 	case *rsa.PublicKey:
-		signatureAlgorithm = AWS4_x509_rsa_sha256
+		signatureAlgorithm = aws4_x509_rsa_sha256
 	default:
-		return aws.Credentials{}, errors.New("unsupported key type anchor and profile regions don't match")
+		return aws.Credentials{}, errors.New("unsupported signature algorithm")
 	}
 
-	rolesAnywhereClient.Handlers.Sign.PushBackNamed(request.NamedHandler{Name: "v4x509.SignRequestHandler", Fn: createRequestSignFunction(s.signer, signatureAlgorithm, certificate, certificateChain)})
+	rolesAnywhereClient.Handlers.Sign.PushBackNamed(request.NamedHandler{Name: "v4x509.SignRequestHandler", Fn: createRequestSignFunction(s.signer, signatureAlgorithm, certificate, certificateChain, s.Date)})
 
 	certificateStr := base64.StdEncoding.EncodeToString(certificate.Raw)
 	durationSeconds := int64(s.CredentialsOpts.SessionDuration)
@@ -173,8 +174,7 @@ func (s *signerCredentialsProvider) Retrieve(ctx context.Context) (aws.Credentia
 	}
 
 	if len(output.CredentialSet) == 0 {
-		msg := "unable to obtain temporary security credentials from CreateSession"
-		return aws.Credentials{}, errors.New(msg)
+		return aws.Credentials{}, errors.New("unable to obtain temporary security credentials from CreateSession")
 	}
 	credentials := output.CredentialSet[0].Credentials
 

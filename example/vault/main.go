@@ -3,32 +3,33 @@ package main
 import (
 	"context"
 	"crypto"
-	"crypto/ecdsa"
-	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
 	"log"
-	"os"
 
 	"flag"
 
+	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 
-	"github.com/aws/aws-sdk-go-v2/config"
-	helper "github.com/aws/rolesanywhere-credential-helper/aws_signing_helper"
+	hv "github.com/hashicorp/vault/api"
 	rolesanywhere "github.com/salrashid123/aws_rolesanywhere_signer"
 )
 
 const ()
 
 var (
-	bundlePath     = flag.String("bundlePath", "", "x509 certificate bundle")
-	certPath       = flag.String("certPath", "certs/alice-cert.crt", "x509 certificate")
-	privateKey     = flag.String("privateKey", "certs/alice-cert.key", "x509 certificate")
+	vaultToken  = flag.String("vaultToken", "", "vaultToken")
+	vaultHost   = flag.String("vaultHost", "http:localhost:8200", "vault host")
+	vaultPolicy = flag.String("vaultPolicy", "pki/issue/domain-dot-com", "vault policy name")
+	vaultCN     = flag.String("vaultCN", "alice-cert.domain.com", "cn for the cert to request")
+
+	bundlePath = flag.String("bundlePath", "", "x509 certificate bundle")
+
 	awsRegion      = flag.String("awsRegion", "us-east-2", "AWS Region")
 	roleARN        = flag.String("roleARN", "arn:aws:iam::291738886548:role/rolesanywhere1", "Role to assume")
-	trustAnchorARN = flag.String("trustAnchorARN", "arn:aws:rolesanywhere:us-east-2:291738886548:trust-anchor/a545a1fc-5d86-4032-8f4c-61cdd6ff92da", "Trust Anchor ARN")
+	trustAnchorARN = flag.String("trustAnchorARN", "arn:aws:rolesanywhere:us-east-2:291738886548:trust-anchor/b48a0464-de03-47a5-83f5-20f5a7a7b375", "Trust Anchor ARN")
 	profileARN     = flag.String("profileARN", "arn:aws:rolesanywhere:us-east-2:291738886548:profile/6f4943fb-13d4-4242-89c4-be367595c380", "Profile ARN")
 )
 
@@ -37,37 +38,55 @@ func main() {
 
 	// ***************************************************************************
 
-	var chain []*x509.Certificate
-	if *bundlePath != "" {
-		var err error
-		chain, err = helper.GetCertChain(*bundlePath)
-		if err != nil {
-			log.Printf("Failed to read certificate bundle: %s\n", err)
-			return
-		}
+	hvconfig := &hv.Config{
+		Address: *vaultHost,
 	}
-	var cert *x509.Certificate
-	if *certPath != "" {
-		var err error
-		_, cert, err = helper.ReadCertificateData(*certPath)
-		if err != nil {
-			log.Printf("error reading certificate %v", err)
-			return
-		}
-	} else if len(chain) > 0 {
-		cert = chain[0]
-	} else {
-		log.Println("No certificate path or certificate bundle path provided")
+
+	hclient, err := hv.NewClient(hvconfig)
+	if err != nil {
+		log.Printf("Unable to initialize vault client: %v", err)
 		return
 	}
 
-	b, err := os.ReadFile(*privateKey)
+	hclient.SetToken(*vaultToken)
+
+	// vaultTokenSecret, err := client.Auth().Token().LookupSelf()
+	// if err != nil {
+	// 	log.Printf("VaultToken: cannot lookup token details: %v", err)
+	// 	return
+	// }
+
+	data := map[string]interface{}{
+		"common_name": *vaultCN,
+	}
+
+	secret, err := hclient.Logical().Write(*vaultPolicy, data)
 	if err != nil {
-		log.Printf("error reading private key %v", err)
+		log.Printf("VaultToken: cannot read vault secret %v", err)
 		return
 	}
-	block, _ := pem.Decode(b)
-	parseResult, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+
+	d := secret.Data
+	publicCert := d["certificate"].(string)
+	caPEM := d["issuing_ca"].(string)
+	privateKey := d["private_key"].(string)
+
+	log.Printf("cA from vault %s\n", caPEM)
+	log.Printf("cert from vault %s\n", publicCert)
+	log.Printf("key from vault %s\n", privateKey)
+	///
+
+	var chain []*x509.Certificate
+	block, _ := pem.Decode([]byte(publicCert))
+
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		log.Printf("error reading certificate %v", err)
+		return
+	}
+
+	block, _ = pem.Decode([]byte(privateKey))
+	parseResult, err := x509.ParsePKCS1PrivateKey(block.Bytes)
 	if err != nil {
 		log.Printf("error reading private key %v", err)
 		return
@@ -75,15 +94,7 @@ func main() {
 
 	var key crypto.Signer
 
-	switch parseResult.(type) {
-	case *rsa.PrivateKey:
-		key = parseResult.(*rsa.PrivateKey)
-	case *ecdsa.PrivateKey:
-		key = parseResult.(*ecdsa.PrivateKey)
-	default:
-		log.Printf("error unsupported key ttype private key %v", err)
-		return
-	}
+	key = parseResult
 
 	sessionCredentials, err := rolesanywhere.NewAWSRolesAnywhereSignerCredentials(rolesanywhere.SignerProvider{
 		CredentialsOpts: rolesanywhere.CredentialsOpts{

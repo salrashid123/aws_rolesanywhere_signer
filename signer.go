@@ -15,8 +15,8 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
+	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"sort"
 	"strings"
@@ -27,8 +27,8 @@ import (
 )
 
 const (
-	AWS4_x509_rsa_sha256   = "AWS4-X509-RSA-SHA256"
-	AWS4_x509_ecdsa_sha256 = "AWS4-X509-ECDSA-SHA256"
+	aws4_x509_rsa_sha256   = "AWS4-X509-RSA-SHA256"
+	aws4_x509_ecdsa_sha256 = "AWS4-X509-ECDSA-SHA256"
 	timeFormat             = "20060102T150405Z"
 	shortTimeFormat        = "20060102"
 	x_amz_date             = "X-Amz-Date"
@@ -63,7 +63,7 @@ func (signerParams *signerParams) getFormattedShortSigningDateTime() string {
 }
 
 // Obtain the scope as part of the SigV4-X509 signature
-func (signerParams *signerParams) GetScope() string {
+func (signerParams *signerParams) getScope() string {
 	var scopeStringBuilder strings.Builder
 	scopeStringBuilder.WriteString(signerParams.getFormattedShortSigningDateTime())
 	scopeStringBuilder.WriteString("/")
@@ -225,7 +225,7 @@ func createStringToSign(canonicalRequest string, signerParams signerParams) stri
 	stringToSignStrBuilder.WriteString("\n")
 	stringToSignStrBuilder.WriteString(signerParams.getFormattedSigningDateTime())
 	stringToSignStrBuilder.WriteString("\n")
-	stringToSignStrBuilder.WriteString(signerParams.GetScope())
+	stringToSignStrBuilder.WriteString(signerParams.getScope())
 	stringToSignStrBuilder.WriteString("\n")
 	stringToSignStrBuilder.WriteString(canonicalRequest)
 	stringToSign := stringToSignStrBuilder.String()
@@ -234,7 +234,7 @@ func createStringToSign(canonicalRequest string, signerParams signerParams) stri
 
 // Builds the complete authorization header
 func buildAuthorizationHeader(request *http.Request, body io.ReadSeeker, signedHeadersString string, signature string, certificate *x509.Certificate, signerParams signerParams) string {
-	signingCredentials := certificate.SerialNumber.String() + "/" + signerParams.GetScope()
+	signingCredentials := certificate.SerialNumber.String() + "/" + signerParams.getScope()
 	credential := "Credential=" + signingCredentials
 	signerHeaders := "SignedHeaders=" + signedHeadersString
 	signatureHeader := "Signature=" + signature
@@ -259,7 +259,7 @@ func encodeDer(der []byte) (string, error) {
 	return buf.String(), nil
 }
 
-func createRequestSignFunction(signer crypto.Signer, signingAlgorithm string, certificate *x509.Certificate, certificateChain []*x509.Certificate) func(*request.Request) {
+func createRequestSignFunction(signer crypto.Signer, signingAlgorithm string, certificate *x509.Certificate, certificateChain []*x509.Certificate, date time.Time) func(*request.Request) {
 	return func(req *request.Request) {
 		region := req.ClientInfo.SigningRegion
 		if region == "" {
@@ -271,7 +271,10 @@ func createRequestSignFunction(signer crypto.Signer, signingAlgorithm string, ce
 			name = req.ClientInfo.ServiceName
 		}
 
-		signerParams := signerParams{time.Now(), region, name, signingAlgorithm}
+		if date.IsZero() {
+			date = time.Now()
+		}
+		signerParams := signerParams{date, region, name, signingAlgorithm}
 
 		// Set headers that are necessary for signing
 		req.HTTPRequest.Header.Set(host, req.HTTPRequest.URL.Host)
@@ -294,7 +297,7 @@ func createRequestSignFunction(signer crypto.Signer, signingAlgorithm string, ce
 		h.Write([]byte(stringToSign))
 		signatureBytes, err := signer.Sign(rand.Reader, h.Sum(nil), crypto.SHA256)
 		if err != nil {
-			log.Println(err.Error())
+			fmt.Printf("error signing: %v\n", err.Error())
 			// todo: find a way to return this error to the caller
 			return //os.Exit(1)
 		}
