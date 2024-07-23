@@ -674,7 +674,7 @@ Remember to set the condition on its use to just the workload:
 
 as in:
 
-```json
+```text
 {
     "Version": "2012-10-17",
     "Statement": [
